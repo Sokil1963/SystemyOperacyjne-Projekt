@@ -1,0 +1,14 @@
+//
+// Created by mikha on 13.10.2025.
+//
+
+#ifndef SYSTEMYOPERACYJNE_PROJEKT_ALGORYTHM_H
+#define SYSTEMYOPERACYJNE_PROJEKT_ALGORYTHM_H
+
+
+class algorythm {
+
+};
+
+
+#endif //SYSTEMYOPERACYJNE_PROJEKT_ALGORYTHM_H
