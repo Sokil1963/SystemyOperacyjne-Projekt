@@ -1,8 +1,3 @@
-//
-// Created by mikha on 13.10.2025.
-//
-
-#include "algorythm.h"
 #include <iostream>
 #include <vector>
 #include <queue>
@@ -11,6 +6,7 @@
 #include <atomic>
 #include <limits>
 #include <chrono>
+#include <algorithm> // Dla std::min
 
 // Definicja "nieskończoności" dla kosztów
 const int INF = std::numeric_limits<int>::max();
@@ -24,12 +20,6 @@ std::mutex pq_mutex;
 
 /**
  * @brief Funkcja zadaniowa dla wątku roboczego.
- * * Przetwarza podzbiór sąsiadów wierzchołka `u`, obliczając nowe koszty dojścia
- * i bezpiecznie aktualizując globalne struktury danych.
- * * @param u Aktualnie przetwarzany wierzchołek.
- * @param neighbors_subset Podzbiór sąsiadów `u` do przetworzenia przez ten wątek.
- * @param dist Referencja do globalnej, atomowej tablicy kosztów.
- * @param pq Referencja do globalnej kolejki priorytetowej.
  */
 void relax_edges_task(
         int u,
@@ -41,24 +31,17 @@ void relax_edges_task(
         int v = edge.first;
         int weight = edge.second;
 
-        // Atomowy odczyt aktualnego kosztu dojścia do u
         int dist_u = dist[u].load(std::memory_order_relaxed);
 
         if (dist_u != INF) {
             int new_dist_v = dist_u + weight;
-
-            // Atomowa aktualizacja kosztu dojścia do v
-            // Używamy pętli compare-and-swap (CAS), aby zapewnić poprawność
             int old_dist_v = dist[v].load(std::memory_order_relaxed);
+
             while (new_dist_v < old_dist_v) {
-                // compare_exchange_weak próbuje zamienić old_dist_v na new_dist_v
-                // Jeśli się uda, zwraca true. Jeśli nie (bo inny wątek już to zrobił),
-                // zwraca false i aktualizuje old_dist_v do nowej wartości z pamięci.
                 if (dist[v].compare_exchange_weak(old_dist_v, new_dist_v)) {
-                    // Jeśli aktualizacja się powiodła, dodajemy v do kolejki
                     std::lock_guard<std::mutex> lock(pq_mutex);
                     pq.push({new_dist_v, v});
-                    break; // Wyjście z pętli CAS
+                    break;
                 }
             }
         }
@@ -67,9 +50,6 @@ void relax_edges_task(
 
 /**
  * @brief Główna funkcja wielowątkowego algorytmu Dijkstry.
- * * @param graph Graf wejściowy.
- * @param start_node Wierzchołek startowy.
- * @param num_threads Liczba wątków roboczych do użycia.
  */
 void dijkstra_parallel(const Graph& graph, int start_node, int num_threads) {
     int n = graph.size();
@@ -79,7 +59,6 @@ void dijkstra_parallel(const Graph& graph, int start_node, int num_threads) {
     }
     dist[start_node].store(0);
 
-    // Kolejka priorytetowa przechowuje pary {koszt, wierzchołek}
     std::priority_queue<std::pair<int, int>, std::vector<std::pair<int, int>>, std::greater<std::pair<int, int>>> pq;
     pq.push({0, start_node});
 
@@ -87,6 +66,7 @@ void dijkstra_parallel(const Graph& graph, int start_node, int num_threads) {
 
     while (true) {
         int u = -1;
+        int d = -1; // Koszt, z którym wierzchołek 'u' został pobrany z kolejki
 
         // Sekcja krytyczna - bezpieczny dostęp do kolejki priorytetowej
         {
@@ -94,27 +74,31 @@ void dijkstra_parallel(const Graph& graph, int start_node, int num_threads) {
             if (pq.empty()) {
                 break; // Koniec algorytmu, jeśli kolejka jest pusta
             }
+            d = pq.top().first;
             u = pq.top().second;
             pq.pop();
         }
 
-        // Optymalizacja: jeśli znaleźliśmy już lepszą ścieżkę do u, ignorujemy ten wpis
-        if (dist[u].load(std::memory_order_relaxed) < pq.top().first && !pq.empty()) {
+        // --- POCZĄTEK POPRAWKI ---
+        // Poprawna optymalizacja: jeśli koszt `d`, z którym pobraliśmy `u` z kolejki,
+        // jest już większy niż aktualnie znany najkrótszy koszt w tablicy `dist`,
+        // oznacza to, że znaleźliśmy już lepszą ścieżkę i ten wpis w kolejce jest przestarzały.
+        if (d > dist[u].load(std::memory_order_relaxed)) {
             continue;
         }
+        // --- KONIEC POPRAWKI ---
 
         const auto& neighbors = graph[u];
         if (neighbors.empty()) {
             continue;
         }
 
-        // Dzielimy listę sąsiadów na części (chunks) dla wątków
         int chunk_size = (neighbors.size() + num_threads - 1) / num_threads;
         threads.clear();
 
         for (int i = 0; i < num_threads; ++i) {
             auto start_it = neighbors.begin() + i * chunk_size;
-            if (start_it >= neighbors.end()) break; // Nie twórz wątku, jeśli nie ma dla niego pracy
+            if (start_it >= neighbors.end()) break;
 
             auto end_it = neighbors.begin() + std::min((size_t)((i + 1) * chunk_size), neighbors.size());
 
@@ -122,13 +106,11 @@ void dijkstra_parallel(const Graph& graph, int start_node, int num_threads) {
             threads.emplace_back(relax_edges_task, u, subset, std::ref(dist), std::ref(pq));
         }
 
-        // Czekamy, aż wszystkie wątki robocze zakończą przetwarzanie sąsiadów wierzchołka u
         for (auto& t : threads) {
             t.join();
         }
     }
 
-    // Wyświetlanie wyników
     std::cout << "Wyniki algorytmu dla " << num_threads << " watkow:\n";
     for (int i = 0; i < n; ++i) {
         int final_dist = dist[i].load();
@@ -137,7 +119,6 @@ void dijkstra_parallel(const Graph& graph, int start_node, int num_threads) {
 }
 
 int main() {
-    // Przykładowy graf do testów
     int num_nodes = 6;
     Graph graph(num_nodes);
     graph[0].assign({{1, 7}, {2, 9}, {5, 14}});
@@ -148,14 +129,11 @@ int main() {
     graph[5].assign({{0, 14}, {2, 2}, {4, 9}});
 
     int start_node = 0;
-    int num_threads = std::thread::hardware_concurrency(); // Użyj tylu wątków, ile rdzeni ma CPU
-    if (num_threads == 0) num_threads = 4; // Zabezpieczenie
+    // WERSJA RĘCZNA
+    int num_threads = 4; // Wpisz tutaj, ile wątków chcesz użyć
 
-    // Pomiar czasu wykonania
     auto start_time = std::chrono::high_resolution_clock::now();
-
     dijkstra_parallel(graph, start_node, num_threads);
-
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> execution_time = end_time - start_time;
 
