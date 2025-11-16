@@ -7,19 +7,15 @@
 #include <limits>
 #include <chrono>
 
-// Definicja "nieskończoności" dla kosztów
+
 const int INF = std::numeric_limits<int>::max();
 
-// Typy pomocnicze dla czytelności
-using Edge = std::pair<int, int>; // para {sąsiad, waga}
-using Graph = std::vector<std::vector<Edge>>; // Graf jako lista sąsiedztwa
 
-// Globalny muteks chroniący dostęp do kolejki priorytetowej
+using Edge = std::pair<int, int>;
+using Graph = std::vector<std::vector<Edge>>;
+
 std::mutex pq_mutex;
 
-/**
- * @brief Funkcja zadaniowa dla wątku roboczego.
- */
 void relax_edges_task(
         int u,
         const std::vector<Edge>& neighbors_subset,
@@ -47,9 +43,7 @@ void relax_edges_task(
     }
 }
 
-/**
- * @brief Główna funkcja wielowątkowego algorytmu Dijkstry.
- */
+
 void dijkstra_parallel(const Graph& graph, int start_node, int num_threads) {
     int n = graph.size();
     std::vector<std::atomic<int>> dist(n);
@@ -65,27 +59,23 @@ void dijkstra_parallel(const Graph& graph, int start_node, int num_threads) {
 
     while (true) {
         int u = -1;
-        int d = -1; // Koszt, z którym wierzchołek 'u' został pobrany z kolejki
+        int d = -1;
 
-        // Sekcja krytyczna - bezpieczny dostęp do kolejki priorytetowej
+
         {
             std::lock_guard<std::mutex> lock(pq_mutex);
             if (pq.empty()) {
-                break; // Koniec algorytmu, jeśli kolejka jest pusta
+                break;
             }
             d = pq.top().first;
             u = pq.top().second;
             pq.pop();
         }
 
-        // --- POCZĄTEK POPRAWKI ---
-        // Poprawna optymalizacja: jeśli koszt `d`, z którym pobraliśmy `u` z kolejki,
-        // jest już większy niż aktualnie znany najkrótszy koszt w tablicy `dist`,
-        // oznacza to, że znaleźliśmy już lepszą ścieżkę i ten wpis w kolejce jest przestarzały.
         if (d > dist[u].load(std::memory_order_relaxed)) {
             continue;
         }
-        // --- KONIEC POPRAWKI ---
+
 
         const auto& neighbors = graph[u];
         if (neighbors.empty()) {
