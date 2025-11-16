@@ -6,7 +6,6 @@
 #include <atomic>
 #include <limits>
 #include <chrono>
-#include <algorithm> // Dla std::min
 
 // Definicja "nieskończoności" dla kosztów
 const int INF = std::numeric_limits<int>::max();
@@ -129,8 +128,7 @@ int main() {
     graph[5].assign({{0, 14}, {2, 2}, {4, 9}});
 
     int start_node = 0;
-    // WERSJA RĘCZNA
-    int num_threads = 4; // Wpisz tutaj, ile wątków chcesz użyć
+    int num_threads = 4;
 
     auto start_time = std::chrono::high_resolution_clock::now();
     dijkstra_parallel(graph, start_node, num_threads);
