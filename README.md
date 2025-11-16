@@ -1,0 +1,1 @@
+A project sorts a graph using Dijkstra algorithm. To enhance the productivity we've added multithreading function. 've resolved quite a number of possible threats using atomic variables and mutex. To measure how much does an algorithm takes, we've used chrono package.
